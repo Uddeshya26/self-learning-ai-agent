@@ -18,6 +18,15 @@ MEMORY_PATTERNS = [
     "i want ",
     "i'm learning ",
     "i am learning ",
+    "i no longer ",
+    "i don't ",
+    "i do not ",
+    "i stopped ",
+    "i've stopped ",
+    "i have stopped ",
+    "i no longer like ",
+    "i no longer love ",
+    "i no longer prefer ",
 ]
 
 
