@@ -9,19 +9,11 @@ from vector_store import (
     update_memory,
 )
 
-
 MODEL = "llama3.2:3b"
 RELEVANCE_THRESHOLD = 0.50
 
 
 def process_memory(memory_text):
-    """
-    Decide whether a new memory is:
-    - duplicate
-    - update
-    - new
-    """
-
     results = search_memory(memory_text, limit=5)
 
     candidates = [item for item in results if item["score"] >= RELEVANCE_THRESHOLD]
@@ -67,10 +59,6 @@ def main():
             print("\nAI: Goodbye! 👋")
             break
 
-        # ---------------------------------------------
-        # 1. Extract a possible memory
-        # ---------------------------------------------
-
         memory_result = extract_memory(user_input)
 
         if memory_result["should_remember"]:
@@ -79,10 +67,6 @@ def main():
             print(f"\n🧠 Extracted memory: {memory_text}")
 
             process_memory(memory_text)
-
-        # ---------------------------------------------
-        # 2. Retrieve relevant memories
-        # ---------------------------------------------
 
         search_results = search_memory(
             user_input,
@@ -108,10 +92,6 @@ def main():
                 print(f"- {memory}")
         else:
             print("- No relevant memories found.")
-
-        # ---------------------------------------------
-        # 3. Give relevant memories to the LLM
-        # ---------------------------------------------
 
         if relevant_memories:
             memory_context = "\n".join(f"- {memory}" for memory in relevant_memories)

@@ -120,6 +120,36 @@ def search_memory(query, limit=5):
     return memories
 
 
+def search_memory_history(query, limit=5):
+    """
+    Search all memories, including current and superseded memories.
+    """
+
+    query_vector = create_embedding(query)
+
+    results = client.query_points(
+        collection_name=COLLECTION_NAME,
+        query=query_vector,
+        limit=limit,
+    )
+
+    memories = []
+
+    for result in results.points:
+        memories.append(
+            {
+                "id": result.id,
+                "memory": result.payload["memory"],
+                "score": result.score,
+                "status": result.payload.get("status", "unknown"),
+                "created_at": result.payload.get("created_at"),
+                "updated_at": result.payload.get("updated_at"),
+            }
+        )
+
+    return memories
+
+
 DUPLICATE_THRESHOLD = 0.90
 
 
