@@ -21,6 +21,17 @@ QDRANT_PATH = "./custom_version/qdrant_data"
 client = QdrantClient(path=QDRANT_PATH)
 
 
+def close_client():
+    """
+    Explicitly close the Qdrant client.
+    """
+    global client
+
+    if client is not None:
+        client.close()
+        client = None
+
+
 def create_collection():
     """
     Create the Qdrant collection if it does not already exist.
@@ -285,4 +296,4 @@ if __name__ == "__main__":
         show_memories()
 
     finally:
-        client.close()
+        close_client()

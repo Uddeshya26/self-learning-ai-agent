@@ -3,6 +3,7 @@ from ollama import chat
 from custom_memory import extract_memory
 from memory_compare import compare_memories
 from vector_store import (
+    close_client,
     create_collection,
     search_memory,
     store_memory,
@@ -131,4 +132,7 @@ Rules:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        close_client()
