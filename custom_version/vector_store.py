@@ -1,6 +1,13 @@
 from ollama import embeddings
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
 from datetime import datetime
 import uuid
 
@@ -65,6 +72,7 @@ def store_memory(memory_text, user_id="uddeshya", category="general"):
             "memory": memory_text,
             "user_id": user_id,
             "category": category,
+            "status": "current",
             "created_at": timestamp,
             "updated_at": timestamp,
         },
@@ -77,15 +85,24 @@ def store_memory(memory_text, user_id="uddeshya", category="general"):
 
 def search_memory(query, limit=5):
     """
-    Search Qdrant for memories that are semantically
-    similar to the user's query.
+    Search only current memories in Qdrant.
     """
 
     query_vector = create_embedding(query)
 
+    current_filter = Filter(
+        must=[
+            FieldCondition(
+                key="status",
+                match=MatchValue(value="current"),
+            )
+        ]
+    )
+
     results = client.query_points(
         collection_name=COLLECTION_NAME,
         query=query_vector,
+        query_filter=current_filter,
         limit=limit,
     )
 
@@ -123,10 +140,8 @@ def is_duplicate(memory_text):
 
 def update_memory(point_id, memory_text):
     """
-    Update an existing memory in Qdrant.
-
-    The vector is regenerated for the new memory,
-    while the original created_at timestamp is preserved.
+    Mark the old memory as superseded and create a new
+    current memory instead of overwriting the old one.
     """
 
     existing_point = client.retrieve(
@@ -139,33 +154,45 @@ def update_memory(point_id, memory_text):
     if not existing_point:
         raise ValueError(f"Memory with ID {point_id} was not found.")
 
-    old_payload = existing_point[0].payload
+    old_point = existing_point[0]
+    old_payload = old_point.payload
 
+    # Mark the old memory as superseded.
+    old_payload["status"] = "superseded"
+    old_payload["updated_at"] = datetime.now().isoformat()
+
+    client.set_payload(
+        collection_name=COLLECTION_NAME,
+        payload=old_payload,
+        points=[point_id],
+    )
+
+    # Create the new memory.
     vector = create_embedding(memory_text)
 
-    updated_payload = {
-        "memory": memory_text,
-        "user_id": old_payload.get("user_id", "uddeshya"),
-        "category": old_payload.get("category", "general"),
-        "created_at": old_payload.get(
-            "created_at",
-            datetime.now().isoformat(),
-        ),
-        "updated_at": datetime.now().isoformat(),
-    }
+    new_point_id = str(uuid.uuid4())
+    timestamp = datetime.now().isoformat()
 
-    point = PointStruct(
-        id=point_id,
+    new_point = PointStruct(
+        id=new_point_id,
         vector=vector,
-        payload=updated_payload,
+        payload={
+            "memory": memory_text,
+            "user_id": old_payload.get("user_id", "uddeshya"),
+            "category": old_payload.get("category", "general"),
+            "status": "current",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "supersedes": point_id,
+        },
     )
 
     client.upsert(
         collection_name=COLLECTION_NAME,
-        points=[point],
+        points=[new_point],
     )
 
-    return point_id
+    return new_point_id
 
 
 def show_memories():
@@ -192,6 +219,8 @@ def show_memories():
         print(f"Memory: {payload.get('memory', 'Unknown')}")
         print(f"User: {payload.get('user_id', 'N/A')}")
         print(f"Category: {payload.get('category', 'N/A')}")
+        print(f"Status: {payload.get('status', 'N/A')}")
+        print(f"Supersedes: {payload.get('supersedes', 'N/A')}")
         print(f"Created: {payload.get('created_at', 'N/A')}")
         print(f"Updated: {payload.get('updated_at', 'N/A')}")
 
@@ -200,33 +229,30 @@ if __name__ == "__main__":
     try:
         create_collection()
 
-        # Store an initial memory
-        original_memory = "The user enjoys playing football."
+        results = search_memory(
+            "The user now prefers cricket.",
+            limit=1,
+        )
 
-        point_id = store_memory(original_memory)
+        if not results:
+            raise ValueError("Could not find the cricket memory.")
 
-        if point_id is None:
-            print("The original memory already exists.")
-            results = search_memory(original_memory, limit=1)
+        old_id = results[0]["id"]
 
-            if not results:
-                raise ValueError("Could not find the existing memory.")
+        new_memory = "The user prefers football again."
 
-            point_id = results[0]["id"]
+        new_id = update_memory(
+            old_id,
+            new_memory,
+        )
 
-        print("\nOriginal memory:")
-        print(original_memory)
+        print("\nOld memory ID:")
+        print(old_id)
 
-        # Update the memory
-        new_memory = "The user now prefers cricket."
+        print("\nNew memory ID:")
+        print(new_id)
 
-        update_memory(point_id, new_memory)
-
-        print("\nUpdated memory:")
-        print(new_memory)
-
-        # Show stored memories
         show_memories()
 
     finally:
-        client.close
+        client.close()
