@@ -29,6 +29,20 @@ MEMORY_PATTERNS = [
     "i no longer prefer ",
 ]
 
+HISTORY_PATTERNS = [
+    "what did i used to",
+    "what did i previously",
+    "what did i prefer before",
+    "what did i like before",
+    "what did i used to like",
+    "what did i used to prefer",
+    "what was my previous",
+    "what were my previous",
+    "how did my",
+    "has my preference changed",
+    "did my preference change",
+]
+
 
 def contains_personal_statement(user_message):
     """
@@ -37,6 +51,16 @@ def contains_personal_statement(user_message):
     message = user_message.strip().lower()
 
     return any(message.startswith(pattern) for pattern in MEMORY_PATTERNS)
+
+
+def is_history_query(user_message):
+    """
+    Detect whether the user is asking about past memory/history.
+    """
+
+    message = user_message.strip().lower()
+
+    return any(pattern in message for pattern in HISTORY_PATTERNS)
 
 
 def extract_memory(user_message):

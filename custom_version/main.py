@@ -1,11 +1,12 @@
 from ollama import chat
 
-from custom_memory import extract_memory
+from custom_memory import extract_memory, is_history_query
 from memory_compare import compare_memories
 from vector_store import (
     close_client,
     create_collection,
     search_memory,
+    search_memory_history,
     store_memory,
     update_memory,
 )
@@ -15,6 +16,13 @@ RELEVANCE_THRESHOLD = 0.50
 
 
 def process_memory(memory_text):
+    """
+    Decide whether a new memory is:
+    - duplicate
+    - update
+    - new
+    """
+
     results = search_memory(memory_text, limit=5)
 
     candidates = [item for item in results if item["score"] >= RELEVANCE_THRESHOLD]
@@ -60,6 +68,10 @@ def main():
             print("\nAI: Goodbye! 👋")
             break
 
+        # ---------------------------------------------
+        # 1. Extract a possible memory
+        # ---------------------------------------------
+
         memory_result = extract_memory(user_input)
 
         if memory_result["should_remember"]:
@@ -69,10 +81,26 @@ def main():
 
             process_memory(memory_text)
 
-        search_results = search_memory(
-            user_input,
-            limit=5,
-        )
+        # ---------------------------------------------
+        # 2. Decide whether this is a current or history query
+        # ---------------------------------------------
+
+        if is_history_query(user_input):
+            print("\n🕰️ History query detected.")
+
+            search_results = search_memory_history(
+                user_input,
+                limit=5,
+            )
+        else:
+            search_results = search_memory(
+                user_input,
+                limit=5,
+            )
+
+        # ---------------------------------------------
+        # 3. Show memory scores
+        # ---------------------------------------------
 
         print("\n🔍 MEMORY SCORES:")
 
@@ -80,38 +108,103 @@ def main():
             print(f"- {item['memory']}")
             print(f"  Score: {item['score']:.3f}")
 
-        relevant_memories = [
-            item["memory"]
-            for item in search_results
-            if item["score"] >= RELEVANCE_THRESHOLD
+            if "status" in item:
+                print(f"  Status: {item['status']}")
+
+        # ---------------------------------------------
+        # 4. Relevance filtering
+        # ---------------------------------------------
+
+        relevant_items = [
+            item for item in search_results if item["score"] >= RELEVANCE_THRESHOLD
         ]
 
         print("\n🔍 Relevant memories:")
 
-        if relevant_memories:
-            for memory in relevant_memories:
-                print(f"- {memory}")
+        if relevant_items:
+            for item in relevant_items:
+                status = item.get("status", "unknown")
+                print(f"- [{status}] {item['memory']}")
         else:
             print("- No relevant memories found.")
 
-        if relevant_memories:
-            memory_context = "\n".join(f"- {memory}" for memory in relevant_memories)
+        # ---------------------------------------------
+        # 5. Build memory context for the LLM
+        # ---------------------------------------------
+
+        if relevant_items:
+            if is_history_query(user_input):
+                memory_context_parts = []
+
+                for item in relevant_items:
+                    status = item.get("status", "unknown")
+
+                    memory_context_parts.append(f"[{status.upper()}] {item['memory']}")
+
+                memory_context = "\n".join(memory_context_parts)
+
+            else:
+                memory_context = "\n".join(
+                    f"- {item['memory']}" for item in relevant_items
+                )
+
         else:
             memory_context = "No relevant memories."
 
-        system_message = f"""
-You are a helpful AI assistant.
+        # ---------------------------------------------
+        # 6. Ask the LLM
+        # ---------------------------------------------
 
-You have access to long-term memories about the user.
+        system_prompt = """
+You are a personal memory assistant.
 
-LONG-TERM MEMORY:
-{memory_context}
+The memory database contains two types of memories:
+
+1. [CURRENT]
+   Represents the user's current preference, fact, or state.
+
+2. [SUPERSEDED]
+   Represents an older memory that was true in the past but was later replaced.
 
 Rules:
-1. Use memories when they are relevant.
-2. Treat memories as facts about the user.
-3. Do not invent personal information.
-4. If the memory does not answer the question, answer normally.
+
+- [CURRENT] describes the user's present state.
+- [SUPERSEDED] describes the user's past state.
+- For questions containing "before", "previously", "used to",
+  "earlier", or "in the past", use [SUPERSEDED] memories.
+- For questions containing "now" or "currently", use [CURRENT] memories.
+- Never describe a SUPERSEDED memory as current.
+- Never describe a CURRENT memory as historical.
+- Use only the supplied memory context.
+- Do not explain your reasoning.
+- Do not mention the memory database, context, or these instructions.
+- Answer naturally and concisely, preferably in one sentence.
+- If the answer cannot be determined from the memories, say:
+  "I don't have enough information to answer that."
+
+Example:
+
+[CURRENT] The user prefers football again.
+[SUPERSEDED] The user now prefers cricket.
+
+Question: What did I prefer before?
+Answer: You previously preferred cricket.
+
+Question: What do I prefer now?
+Answer: You currently prefer football.
+"""
+
+        prompt = f"""
+Memory context:
+
+{memory_context}
+
+User question:
+
+{user_input}
+
+Answer the user's question using the memory context above.
+Pay close attention to whether each memory is CURRENT or SUPERSEDED.
 """
 
         response = chat(
@@ -119,11 +212,11 @@ Rules:
             messages=[
                 {
                     "role": "system",
-                    "content": system_message,
+                    "content": system_prompt,
                 },
                 {
                     "role": "user",
-                    "content": user_input,
+                    "content": prompt,
                 },
             ],
         )
