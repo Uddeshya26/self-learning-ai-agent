@@ -18,6 +18,110 @@ from vector_store import (
 MODEL = "llama3.2:3b"
 RELEVANCE_THRESHOLD = 0.50
 
+SIMILARITY_WEIGHT = 0.8
+IMPORTANCE_WEIGHT = 0.2
+
+
+def calculate_ranking_score(item):
+    """
+    Combine semantic similarity and memory importance.
+
+    Similarity contributes 80%.
+    Importance contributes 20%.
+    """
+
+    try:
+        similarity = float(item.get("score", 0.0))
+    except (ValueError, TypeError):
+        similarity = 0.0
+
+    try:
+        importance = float(item.get("importance", 0.5))
+    except (ValueError, TypeError):
+        importance = 0.5
+
+    # Keep importance within its valid range.
+    importance = max(0.0, min(1.0, importance))
+
+    return SIMILARITY_WEIGHT * similarity + IMPORTANCE_WEIGHT * importance
+
+
+def classify_learning_status(memory_text):
+    """Identify whether a learning memory is an activity or a goal."""
+
+    text = memory_text.lower()
+
+    future_phrases = (
+        "wants to learn",
+        "want to learn",
+        "plans to learn",
+        "hopes to learn",
+        "aims to learn",
+        "would like to learn",
+    )
+
+    current_phrases = (
+        "is learning",
+        "is studying",
+        "currently learning",
+        "currently studying",
+    )
+
+    if any(phrase in text for phrase in future_phrases):
+        return "FUTURE GOAL"
+
+    if any(phrase in text for phrase in current_phrases):
+        return "CURRENT ACTIVITY"
+
+    return "NOT SPECIFIED"
+
+
+def join_naturally(items):
+    """Join phrases into natural English."""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def build_learning_summary(relevant_items):
+    """Summarize current learning activities and future goals."""
+    activities = []
+    goals = []
+
+    for item in relevant_items:
+        if item.get("status", "current").lower() != "current":
+            continue
+
+        memory = item["memory"].strip().rstrip(".")
+        text = memory.lower()
+
+        if text.startswith("the user is learning "):
+            subject = memory[len("The user is learning ") :]
+            activities.append(f"learning {subject}")
+
+        elif text.startswith("the user is studying "):
+            subject = memory[len("The user is studying ") :]
+            activities.append(f"studying {subject}")
+
+        elif text.startswith("the user wants to learn "):
+            subject = memory[len("The user wants to learn ") :]
+            goals.append(subject)
+
+    parts = []
+
+    if activities:
+        parts.append(f"You're currently {join_naturally(activities)}.")
+
+    if goals:
+        parts.append(f"You also want to learn {join_naturally(goals)}.")
+
+    if not parts:
+        return "I don't have enough information about your learning activities."
+
+    return " ".join(parts)
+
 
 def process_memory(memory_text):
     """
@@ -131,45 +235,59 @@ def main():
                 print(f"  Status: {item['status']}")
 
         # ---------------------------------------------
-        # 4. Relevance filtering
+        # 4. Filter and rank relevant memories
         # ---------------------------------------------
 
         relevant_items = [
             item for item in search_results if item["score"] >= RELEVANCE_THRESHOLD
         ]
 
-        print("\n🔍 Relevant memories:")
+        # Calculate combined ranking score.
+        for item in relevant_items:
+            item["ranking_score"] = calculate_ranking_score(item)
+
+        # Sort by highest ranking score first.
+        relevant_items.sort(
+            key=lambda item: item["ranking_score"],
+            reverse=True,
+        )
+
+        # Display ranked memories.
+        print("\n🏆 RANKED RELEVANT MEMORIES:")
 
         if relevant_items:
             for item in relevant_items:
                 status = item.get("status", "unknown")
+                importance = item.get("importance", 0.5)
+
                 print(f"- [{status}] {item['memory']}")
+                print(f"  Similarity: {item['score']:.3f}")
+                print(f"  Importance: {importance:.2f}")
+                print(f"  Ranking score: {item['ranking_score']:.3f}")
         else:
             print("- No relevant memories found.")
 
         # ---------------------------------------------
-        # 5. Build memory context for the LLM
+        # 5. Build annotated memory context
         # ---------------------------------------------
 
         if relevant_items:
-            if is_history_query(user_input):
-                memory_context_parts = []
+            memory_context_parts = []
 
-                for item in relevant_items:
-                    status = item.get("status", "unknown")
+            for item in relevant_items:
+                record_status = item.get("status", "unknown").upper()
 
-                    memory_context_parts.append(f"[{status.upper()}] {item['memory']}")
+                learning_status = classify_learning_status(item["memory"])
 
-                memory_context = "\n".join(memory_context_parts)
-
-            else:
-                memory_context = "\n".join(
-                    f"- {item['memory']}" for item in relevant_items
+                memory_context_parts.append(
+                    f"[RECORD: {record_status} | "
+                    f"LEARNING: {learning_status}] "
+                    f"{item['memory']}"
                 )
 
+            memory_context = "\n".join(memory_context_parts)
         else:
             memory_context = "No relevant memories."
-
         # ---------------------------------------------
         # 6. Ask the LLM
         # ---------------------------------------------
@@ -201,6 +319,40 @@ Rules:
 - If the answer cannot be determined from the memories, say:
   "I don't have enough information to answer that."
 
+  When answering questions about learning:
+
+- Include all relevant learning activities and goals
+  from the supplied memory context.
+- Distinguish CURRENT ACTIVITY from FUTURE GOAL.
+- A FUTURE GOAL must not be described as something
+  the user is already learning.
+- A CURRENT record status does not necessarily mean
+  the described activity is currently underway.
+- Mention current activities first, followed by future goals.
+- Do not omit relevant memories just because their ranking
+  scores are slightly lower.
+- Do not invent relationships or motivations.
+
+Learning status rules:
+
+- "The user is learning..." means currently learning.
+- "The user is studying..." means currently studying.
+- "The user wants to learn..." means a future learning goal,
+  not necessarily something currently being studied.
+- Never convert an intention or goal into a current activity.
+- Preserve the exact status expressed in each memory.
+
+Example memories:
+[CURRENT] The user is learning deep learning.
+[CURRENT] The user is studying computer vision.
+[CURRENT] The user wants to learn reinforcement learning.
+
+Question: What am I learning?
+
+Correct answer:
+"You're currently learning deep learning and studying
+computer vision. You also want to learn reinforcement learning."
+
 Example:
 
 [CURRENT] The user prefers football again.
@@ -225,6 +377,28 @@ User question:
 Answer the user's question using the memory context above.
 Pay close attention to whether each memory is CURRENT or SUPERSEDED.
 """
+        print("\n🧠 MEMORY CONTEXT SENT TO LLM:")
+        print(memory_context)
+
+        # ---------------------------------------------
+        # Answer learning overview questions directly
+        # ---------------------------------------------
+
+        normalized_question = user_input.lower().strip(" ?!.")
+
+        learning_questions = {
+            "what am i learning",
+            "what am i studying",
+            "what are my learning goals",
+            "what do i want to learn",
+        }
+
+        if normalized_question in learning_questions and not is_history_query(
+            user_input
+        ):
+            answer = build_learning_summary(relevant_items)
+            print(f"\nAI: {answer}\n")
+            continue
 
         response = chat(
             model=MODEL,
