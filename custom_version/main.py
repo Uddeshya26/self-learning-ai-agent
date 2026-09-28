@@ -1,6 +1,10 @@
 from ollama import chat
 
-from custom_memory import extract_memory, is_history_query
+from custom_memory import (
+    calculate_importance,
+    extract_memory,
+    is_history_query,
+)
 from memory_compare import compare_memories
 from vector_store import (
     close_client,
@@ -44,14 +48,28 @@ def process_memory(memory_text):
             return
 
         if relationship == "update":
+            importance = calculate_importance(memory_text)
+
+            print(f"⭐ New memory importance: {importance:.2f}")
+
             update_memory(
                 existing["id"],
                 memory_text,
+                importance=importance,
             )
+
             print("🔄 Memory updated.")
             return
 
-    store_memory(memory_text)
+    importance = calculate_importance(memory_text)
+
+    print(f"⭐ Memory importance: {importance:.2f}")
+
+    store_memory(
+        memory_text,
+        importance=importance,
+    )
+
     print("💾 New memory stored.")
 
 
@@ -107,6 +125,7 @@ def main():
         for item in search_results:
             print(f"- {item['memory']}")
             print(f"  Score: {item['score']:.3f}")
+            print(f"  Importance: {item.get('importance', 0.5):.2f}")
 
             if "status" in item:
                 print(f"  Status: {item['status']}")

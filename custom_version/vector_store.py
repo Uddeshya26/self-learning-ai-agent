@@ -1,3 +1,6 @@
+import uuid
+from datetime import datetime
+
 from ollama import embeddings
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -8,8 +11,6 @@ from qdrant_client.models import (
     PointStruct,
     VectorParams,
 )
-from datetime import datetime
-import uuid
 
 EMBEDDING_MODEL = "nomic-embed-text"
 COLLECTION_NAME = "custom_memory"
@@ -61,7 +62,12 @@ def create_embedding(text):
     return response["embedding"]
 
 
-def store_memory(memory_text, user_id="uddeshya", category="general"):
+def store_memory(
+    memory_text,
+    user_id="uddeshya",
+    category="general",
+    importance=0.5,
+):
     """
     Store a memory with useful metadata.
     """
@@ -83,6 +89,7 @@ def store_memory(memory_text, user_id="uddeshya", category="general"):
             "memory": memory_text,
             "user_id": user_id,
             "category": category,
+            "importance": importance,
             "status": "current",
             "created_at": timestamp,
             "updated_at": timestamp,
@@ -125,6 +132,7 @@ def search_memory(query, limit=5):
                 "id": result.id,
                 "memory": result.payload["memory"],
                 "score": result.score,
+                "importance": result.payload.get("importance", 0.5),
             }
         )
 
@@ -153,6 +161,7 @@ def search_memory_history(query, limit=5):
                 "memory": result.payload["memory"],
                 "score": result.score,
                 "status": result.payload.get("status", "unknown"),
+                "importance": result.payload.get("importance", 0.5),
                 "created_at": result.payload.get("created_at"),
                 "updated_at": result.payload.get("updated_at"),
             }
@@ -221,6 +230,7 @@ def update_memory(point_id, memory_text):
             "memory": memory_text,
             "user_id": old_payload.get("user_id", "uddeshya"),
             "category": old_payload.get("category", "general"),
+            "importance": importance,
             "status": "current",
             "created_at": timestamp,
             "updated_at": timestamp,
@@ -264,6 +274,7 @@ def show_memories():
         print(f"Supersedes: {payload.get('supersedes', 'N/A')}")
         print(f"Created: {payload.get('created_at', 'N/A')}")
         print(f"Updated: {payload.get('updated_at', 'N/A')}")
+        print(f"Importance: {payload.get('importance', 0.5)}")
 
 
 if __name__ == "__main__":

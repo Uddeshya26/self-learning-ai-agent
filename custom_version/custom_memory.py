@@ -63,6 +63,81 @@ def is_history_query(user_message):
     return any(pattern in message for pattern in HISTORY_PATTERNS)
 
 
+def calculate_importance(memory_text):
+    """
+    Estimate how useful a memory will be for future conversations.
+
+    Returns:
+        float between 0.1 and 1.0
+    """
+
+    system_prompt = """
+You are an AI memory importance evaluator.
+
+Evaluate how useful this memory would be to remember about the user
+for future conversations.
+
+Choose exactly ONE importance score from 1 to 10.
+
+Meaning:
+
+1-2  = temporary or trivial information
+3-4  = mildly useful information
+5-6  = useful preference or interest
+7-8  = important ongoing interest, goal, or recurring fact
+9    = highly important long-term personal information
+10   = extremely important identity information
+
+Judge the usefulness of the information itself.
+Do not judge emotional wording.
+
+Return ONLY valid JSON with an integer score.
+
+For example:
+{"importance": 8}
+"""
+
+    prompt = f"""
+Evaluate this memory:
+
+{memory_text}
+
+Choose an importance score from 1 to 10.
+Return only JSON.
+"""
+
+    response = chat(
+        model=MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        format="json",
+    )
+
+    try:
+        result = json.loads(response["message"]["content"])
+
+        score = int(result["importance"])
+
+        # Keep the score between 1 and 10
+        score = max(1, min(10, score))
+
+        # Convert 1-10 to 0.1-1.0
+        return score / 10
+
+    except (KeyError, ValueError, TypeError, json.JSONDecodeError):
+        print("⚠️ Could not calculate importance.")
+        print("Raw response:", response["message"]["content"])
+        return 0.5
+
+
 def extract_memory(user_message):
     """
     Convert a personal statement into a clean memory.
