@@ -17,7 +17,6 @@ COLLECTION_NAME = "custom_memory"
 
 QDRANT_PATH = "./custom_version/qdrant_data"
 
-
 # Connect to local Qdrant
 client = QdrantClient(path=QDRANT_PATH)
 
@@ -133,6 +132,7 @@ def search_memory(query, limit=5):
                 "memory": result.payload["memory"],
                 "score": result.score,
                 "importance": result.payload.get("importance", 0.5),
+                "status": result.payload.get("status", "unknown"),
             }
         )
 

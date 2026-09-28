@@ -2,7 +2,7 @@ import json
 import re
 from ollama import chat
 
-MODEL = "llama3.2:3b"
+MODEL = "llama3.1:8b"
 
 
 def canonicalize_preference(memory):
